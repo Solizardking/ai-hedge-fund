@@ -129,8 +129,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        help="LLM the investor agents reason with, e.g. claude-opus-5-5 "
-        "(default: HEDGE_FUND_LLM_MODEL env, else the built-in default); quant "
+        help="LLM the investor agents reason with, e.g. grok-4.7 or jev-1.13.0 "
+        "(default: HEDGE_FUND_LLM_MODEL env, else grok-4.7); quant "
         "models ignore it",
     )
     commands = parser.add_subparsers(dest="command")

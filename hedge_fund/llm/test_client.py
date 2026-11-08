@@ -98,6 +98,89 @@ def test_kimi_accepts_moonshot_key(monkeypatch):
     assert make_llm(_BY_PROVIDER["Kimi"]).model == _BY_PROVIDER["Kimi"]
 
 
+def test_default_model_uses_xai_key_not_openai(monkeypatch):
+    """No model selected means grok-4.7, and only XAI_API_KEY authenticates it."""
+    monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key-must-not-count")
+    with pytest.raises(ValueError, match="XAI_API_KEY"):
+        make_llm()
+
+
+def test_grok_calls_the_responses_api(monkeypatch):
+    """Grok goes to api.x.ai with the xAI key, and the prompt is not stored."""
+    monkeypatch.delenv("HEDGE_FUND_LLM_MODEL", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
+    created: dict = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            created["request"] = kwargs
+            return Mock(output_text='{"signal": "bullish"}')
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            created["client"] = kwargs
+            self.responses = FakeResponses()
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    llm = make_llm()
+    assert llm.model == "grok-4.7"
+    assert created["client"]["api_key"] == "xai-test-key"
+    assert created["client"]["base_url"] == "https://api.x.ai/v1"
+    assert created["client"]["timeout"] == client_module.XAI_REASONING_TIMEOUT
+    assert llm.complete("system", "user") == '{"signal": "bullish"}'
+    assert created["request"] == {
+        "model": "grok-4.7",
+        "input": [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "user"},
+        ],
+        "store": False,
+    }
+
+
+def test_grok_streams_text_deltas(monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
+
+    class Event:
+        def __init__(self, type_, delta="") -> None:
+            self.type = type_
+            self.delta = delta
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            assert kwargs["stream"] is True
+            assert kwargs["store"] is False
+            return [
+                Event("response.output_text.delta", '{"sig'),
+                Event("response.reasoning.delta", "hidden"),
+                Event("response.output_text.delta", 'nal"}'),
+            ]
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+    seen: list[str] = []
+    text = make_llm("grok-4.7", timeout=12, on_token=seen.append).complete("s", "u")
+    assert seen == ['{"sig', 'nal"}']
+    assert text == '{"signal"}'
+
+
+def test_response_text_reads_message_blocks_when_output_text_is_empty():
+    message = Mock(type="message", content=[
+        Mock(type="reasoning", text="scratch"),
+        Mock(type="output_text", text='{"signal": "bearish"}'),
+    ])
+    response = Mock(output_text="", output=[Mock(type="reasoning"), message])
+    assert client_module._response_text(response) == '{"signal": "bearish"}'
+
+
 def test_provider_for_reads_the_registry():
     assert provider_for("claude-opus-5-5") == "Anthropic"
     assert provider_for("claude-fable-5-1") == "Anthropic"

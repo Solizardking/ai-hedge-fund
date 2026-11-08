@@ -33,7 +33,12 @@ from hedge_fund.llm.registry import (
     SUPPORTED_PROVIDERS,
 )
 
-DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = "grok-4.7"
+# grok-4.7 is a reasoning model. The Responses API docs use a one-hour
+# timeout; the 60s shared with the chat providers cuts those calls off.
+XAI_BASE_URL = "https://api.x.ai/v1"
+XAI_REASONING_TIMEOUT = 3600.0
+_CHAT_TIMEOUT = 60.0
 
 # Called with each piece of text as it arrives. None means don't stream.
 TokenListener = Callable[[str], None] | None
@@ -224,7 +229,7 @@ def _retry_delay(header: str | None) -> float:
 
 def make_llm(
     model: str | None = None,
-    timeout: float = 60.0,
+    timeout: float = _CHAT_TIMEOUT,
     max_tokens: int = 4096,
     on_token: TokenListener = None,
 ) -> LLMClient:
@@ -269,9 +274,13 @@ def make_llm(
         chat = ChatGoogleGenerativeAI(model=model, api_key=api_key,
                                       timeout=timeout, max_retries=1)
     elif provider == "xAI":
-        from langchain_xai import ChatXAI
-        chat = ChatXAI(model=model, api_key=api_key, timeout=timeout,
-                       max_retries=1)
+        # Grok speaks the OpenAI Responses API, but the key is XAI_API_KEY.
+        # A set OPENAI_API_KEY must not authenticate or redirect these calls.
+        # store=False keeps the prompt on this machine; the API would
+        # otherwise retain it for 30 days. Output budget is omitted: a
+        # reasoning model's thinking shares max_output_tokens with the answer.
+        xai_timeout = XAI_REASONING_TIMEOUT if timeout == _CHAT_TIMEOUT else timeout
+        return XAIResponsesLLM(model, api_key, xai_timeout, on_token)
     elif provider == "Kimi":
         # Moonshot speaks the OpenAI wire format. Default to the international
         # host; mainland users override with MOONSHOT_BASE_URL (v1 does the same).
@@ -289,7 +298,62 @@ def make_llm(
 def AnthropicLLM(model: str | None = None, **kwargs) -> LLMClient:  # noqa: N802
     """Back-compat shim: v2 was Anthropic-only, and this name is exported.
     Prefer make_llm(), which honours whichever model is selected."""
-    return make_llm(model or DEFAULT_MODEL, **kwargs)
+    return make_llm(model or "claude-opus-5-5", **kwargs)
+
+
+class XAIResponsesLLM:
+    """Grok through the OpenAI-compatible Responses API.
+
+    Stateless on purpose: each investor call sends its own system and user
+    text and does not chain `previous_response_id`. The local prompt cache
+    is the memory. With an `on_token` listener the same call streams text
+    deltas; complete() still returns the whole answer.
+    """
+
+    def __init__(self, model: str, api_key: str, timeout: float,
+                 on_token: TokenListener = None) -> None:
+        from openai import OpenAI
+
+        self.model = model
+        self._on_token = on_token
+        self._client = OpenAI(api_key=api_key, base_url=XAI_BASE_URL, timeout=timeout)
+
+    def complete(self, system: str, user: str) -> str:
+        request = {
+            "model": self.model,
+            "input": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "store": False,
+        }
+        if self._on_token is None:
+            return _response_text(self._client.responses.create(**request))
+
+        parts: list[str] = []
+        for event in self._client.responses.create(**request, stream=True):
+            if getattr(event, "type", None) != "response.output_text.delta":
+                continue
+            delta = getattr(event, "delta", "") or ""
+            if delta:
+                parts.append(delta)
+                self._on_token(delta)
+        return "".join(parts)
+
+
+def _response_text(response) -> str:
+    """The answer text from a Responses API result, ignoring reasoning items."""
+    text = getattr(response, "output_text", None)
+    if isinstance(text, str) and text:
+        return text
+    parts: list[str] = []
+    for item in getattr(response, "output", None) or []:
+        if getattr(item, "type", None) != "message":
+            continue
+        for block in getattr(item, "content", None) or []:
+            if getattr(block, "type", None) == "output_text":
+                parts.append(getattr(block, "text", "") or "")
+    return "".join(parts)
 
 
 def _flatten(content, sep: str = "\n") -> str:

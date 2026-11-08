@@ -64,7 +64,7 @@ def horizon_label(days: int) -> str:
 # reads HEDGE_FUND_LLM_MODEL (hedge_fund/llm/client.py) and routes to the right provider, so
 # setting that env var steers every agent instance — the warm roster AND the
 # Fund — with no threading. Quant models (PEAD) carry no LLM and ignore it.
-DEFAULT_MODEL_LABEL = "Opus 5.5"
+DEFAULT_MODEL_LABEL = "Grok 4.7"
 
 DEFAULT_RISK = {"max_position_pct": 0.25, "max_gross_exposure": 1.0,
                 "halve_drawdown_pct": 0.10, "max_drawdown_pct": 0.20}
