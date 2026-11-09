@@ -7,7 +7,7 @@ WORKDIR /app
 # deploys), while directory transfers (hedge_fund/) arrive intact.
 RUN printf 'PyYAML>=6.0,<7\n' > requirements.txt && pip install --no-cache-dir -r requirements.txt
 
-COPY hedge_fund/ ./hedge_fund/
+COPY backend/hedge_fund/ ./hedge_fund/
 
 ENV PYTHONUNBUFFERED=1
 # Railway injects $PORT; default for local docker runs.
