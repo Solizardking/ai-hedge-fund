@@ -93,7 +93,7 @@ def list_funds() -> list:
 
 
 def engine_present() -> dict:
-    pkg = Path(__file__).resolve().parent / "hedge_fund"
+    pkg = Path(__file__).resolve().parent  # this module lives inside hedge_fund/
     py = list(pkg.rglob("*.py")) if pkg.exists() else []
     return {"bundled": pkg.exists(), "python_files": len(py)}
 
