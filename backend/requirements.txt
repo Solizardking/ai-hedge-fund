@@ -1,0 +1,5 @@
+# v1 read-only state API: the server itself needs only PyYAML (fund.yaml).
+# The bundled hedge_fund engine's runtime deps (pandas, numpy, scipy,
+# pydantic, matplotlib, rich, requests, python-dotenv, langchain-*) are
+# added with the execution/client phase, when tick/backtest endpoints land.
+PyYAML>=6.0,<7
