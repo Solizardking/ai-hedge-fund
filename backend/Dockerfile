@@ -2,8 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.txt is inlined on purpose: Railway's build-context snapshot
+# for this repo intermittently drops small root files (observed across 8
+# deploys), while directory transfers (hedge_fund/) arrive intact.
+RUN printf 'PyYAML>=6.0,<7\n' > requirements.txt && pip install --no-cache-dir -r requirements.txt
 
 COPY hedge_fund/ ./hedge_fund/
 
